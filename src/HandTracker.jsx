@@ -4,6 +4,10 @@ import {
   HandLandmarker
 } from "@mediapipe/tasks-vision";
 import tumblerUrl from "./assets/tumbler.png";
+import emptyUrl from "./assets/tStates/CHAYA_EMPTY.svg";
+import lowUrl from "./assets/tStates/CHAYA_LOW.svg";
+import halfUrl from "./assets/tStates/CHAYA _HALF.svg";
+import fullUrl from "./assets/tStates/CHAYA_FULL.svg";
 
 export default function HandTracker() {
   const videoRef = useRef(null);
@@ -18,6 +22,15 @@ export default function HandTracker() {
     let lastDetectionTime = 0;
     let lastResults = null;
     let lastSeenTime = 0;
+    let lastFrameTime = performance.now();
+    let handPoses = [];
+    const glasses = [{ volume: 100 }, { volume: 0 }];
+    const teaParticles = [];
+    const stateImages = [emptyUrl, lowUrl, halfUrl, fullUrl].map((source) => {
+      const image = new Image();
+      image.src = source;
+      return image;
+    });
 
     const detectionInterval = 50;
 
@@ -29,7 +42,7 @@ export default function HandTracker() {
     tumblerImage.src = tumblerUrl;
     tumblerImage.onload = () => {
       if (isActive && lastResults) {
-        drawHands(lastResults, performance.now() - lastSeenTime <= landmarkGracePeriod);
+        drawHands(performance.now() - lastSeenTime <= landmarkGracePeriod);
       }
     };
 
@@ -98,6 +111,14 @@ export default function HandTracker() {
       if (!video || !handLandmarkerRef.current) { animationFrame = requestAnimationFrame(detectHands); return; }
 
       const now = performance.now();
+      const canvas = canvasRef.current;
+      const width = video.videoWidth;
+      const height = video.videoHeight;
+
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
 
       if (video.readyState >= 2 && now - lastDetectionTime >= detectionInterval) {
         lastDetectionTime = now;
@@ -108,13 +129,19 @@ export default function HandTracker() {
           lastSeenTime = now;
         }
 
-        drawHands(lastResults, now - lastSeenTime <= landmarkGracePeriod);
+        if (results.landmarks?.length) {
+          handPoses = getHandPoses(results.landmarks, width, height);
+        }
       }
 
+      const deltaTime = Math.min((now - lastFrameTime) / 1000, 0.05);
+      lastFrameTime = now;
+      updateTea(handPoses, deltaTime, canvas.width, canvas.height);
+      drawHands(now - lastSeenTime <= landmarkGracePeriod);
       animationFrame = requestAnimationFrame(detectHands);
     }
 
-    function drawHands(results, shouldKeepLastResults) {
+    function drawHands(shouldKeepLastResults) {
       const canvas = canvasRef.current;
       const ctx = canvas.getContext("2d");
 
@@ -127,25 +154,33 @@ export default function HandTracker() {
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      if (!results?.landmarks || !shouldKeepLastResults) return;
+      if (!handPoses.length || !shouldKeepLastResults) return;
 
-      const handAnchors = results.landmarks.slice(0, 2).map((hand) => {
+      handPoses.forEach((hand, index) => {
+        drawChayaGlass(ctx, hand, glasses[index], canvas.width);
+      });
+      drawTeaParticles(ctx);
+    }
+
+    function getHandPoses(landmarks, width, height) {
+      return landmarks.slice(0, 2).map((hand) => {
         const points = trackedLandmarks.map((landmarkIndex) => hand[landmarkIndex]);
-        for (const point of points) drawPoint(ctx, point, canvas.width, canvas.height);
+        const firstPoint = { x: points[0].x * width, y: points[0].y * height };
+        const secondPoint = { x: points[1].x * width, y: points[1].y * height };
+        const handAngle = Math.atan2(secondPoint.y - firstPoint.y, secondPoint.x - firstPoint.x);
+        const angle = handAngle - Math.PI / 2;
+        const size = Math.max(110, Math.min(Math.hypot(secondPoint.x - firstPoint.x, secondPoint.y - firstPoint.y) * 3.2, width * 0.3));
+        const anchor = getPointBetween(points[0], points[1], width, height);
+        const brimDirection = { x: -Math.cos(handAngle), y: -Math.sin(handAngle) };
+
         return {
-          anchor: getPointBetween(points[0], points[1], canvas.width, canvas.height),
-          firstPoint: points[0],
-          secondPoint: points[1]
+          anchor,
+          size,
+          angle,
+          brim: { x: anchor.x + brimDirection.x * size * 0.43, y: anchor.y + brimDirection.y * size * 0.43 },
+          brimDirection
         };
       });
-
-      for (const hand of handAnchors) {
-        drawChayaGlass(ctx, hand, canvas.width, canvas.height);
-      }
-
-      if (handAnchors.length === 2) {
-        drawDistanceOverlay(ctx, handAnchors[0].anchor, handAnchors[1].anchor, canvas.width, canvas.height);
-      }
     }
 
     function getPointBetween(firstPoint, secondPoint, width, height) {
@@ -155,66 +190,123 @@ export default function HandTracker() {
       };
     }
 
-    function drawPoint(ctx, point, width, height) {
-      const x = point.x * width;
-      const y = point.y * height;
-
-      ctx.beginPath();
-      ctx.arc(x, y, Math.max(7, width / 90), 0, Math.PI * 2);
-      ctx.fillStyle = "#f00";
-      ctx.fill();
-      ctx.lineWidth = Math.max(3, width / 40);
-    }
-
-    function drawDistanceOverlay(ctx, firstAnchor, secondAnchor, width, height) {
-      const deltaX = secondAnchor.x - firstAnchor.x;
-      const deltaY = secondAnchor.y - firstAnchor.y;
+    // function drawDistanceOverlay(ctx, firstAnchor, secondAnchor, width, height) {
+    //   const deltaX = secondAnchor.x - firstAnchor.x;
+    //   const deltaY = secondAnchor.y - firstAnchor.y;
       
-      const distance = Math.sqrt(deltaX ** 2 + deltaY ** 2);
-      const midpoint = {
-        x: (firstAnchor.x + secondAnchor.x) / 2,
-        y: (firstAnchor.y + secondAnchor.y) / 2
-      };
+    //   const distance = Math.sqrt(deltaX ** 2 + deltaY ** 2);
+    //   const midpoint = {
+    //     x: (firstAnchor.x + secondAnchor.x) / 2,
+    //     y: (firstAnchor.y + secondAnchor.y) / 2
+    //   };
 
 
-      const distanceLabel = `${Math.round(distance)}`;
-      const labelX = midpoint.x;
-      const labelY = Math.max(34, midpoint.y - height / 12);
-      const fontSize = Math.max(16, width / 38);
+    //   const distanceLabel = `${Math.round(distance)}`;
+    //   const labelX = midpoint.x;
+    //   const labelY = Math.max(34, midpoint.y - height / 12);
+    //   const fontSize = Math.max(16, width / 38);
 
-      ctx.font = `600 ${fontSize}px ui-monospace, monospace`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      const labelWidth = ctx.measureText(distanceLabel).width + fontSize * 1.4;
+    //   ctx.font = `600 ${fontSize}px ui-monospace, monospace`;
+    //   ctx.textAlign = "center";
+    //   ctx.textBaseline = "middle";
+    //   const labelWidth = ctx.measureText(distanceLabel).width + fontSize * 1.4;
 
-      ctx.fillStyle = "#fff3";
-      roundRect(ctx, labelX - labelWidth / 2, labelY - fontSize, labelWidth, fontSize * 2, fontSize / 2);
-      ctx.fill();
-      ctx.fillText(distanceLabel, labelX, labelY);
-    }
+    //   ctx.fillStyle = "#fff3";
+    //   roundRect(ctx, labelX - labelWidth / 2, labelY - fontSize, labelWidth, fontSize * 2, fontSize / 2);
+    //   ctx.fill();
+    //   ctx.fillText(distanceLabel, labelX, labelY);
+    // }
 
-    function drawChayaGlass(ctx, hand, width, height) {
-      if (!tumblerImage.complete || !tumblerImage.naturalWidth) return;
-
-      const firstPoint = {
-        x: hand.firstPoint.x * width,
-        y: hand.firstPoint.y * height
-      };
-      const secondPoint = {
-        x: hand.secondPoint.x * width,
-        y: hand.secondPoint.y * height
-      };
-      const handLength = Math.hypot(secondPoint.x - firstPoint.x, secondPoint.y - firstPoint.y);
-      const glassSize = Math.max(110, Math.min(handLength * 3.2, width * 0.3));
-      const angle = Math.atan2(secondPoint.y - firstPoint.y, secondPoint.x - firstPoint.x) - Math.PI / 2;
+    function drawChayaGlass(ctx, hand, glass, width) {
+      const stateImage = stateImages[getStateIndex(glass.volume)];
+      if (!stateImage.complete || !stateImage.naturalWidth) return;
 
       ctx.save();
       ctx.translate(hand.anchor.x, hand.anchor.y);
-      ctx.rotate(angle);
+      ctx.rotate(hand.angle);
       ctx.shadowColor = "rgba(0, 0, 0, 0.35)";
       ctx.shadowBlur = Math.max(8, width / 90);
-      ctx.drawImage(tumblerImage, -glassSize / 2, -glassSize / 2, glassSize, glassSize);
+      ctx.drawImage(stateImage, -hand.size / 2, -hand.size / 2, hand.size * 0.5, hand.size * 0.75);
       ctx.restore();
+
+      ctx.save();
+      ctx.font = `700 ${Math.max(14, width / 58)}px ui-monospace, monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "rgba(255, 247, 222, 0.95)";
+      ctx.shadowColor = "rgba(25, 12, 4, 0.8)";
+      ctx.shadowBlur = 5;
+      ctx.fillText(`${Math.round(glass.volume)}%`, hand.anchor.x, hand.anchor.y + hand.size * 0.3);
+      ctx.restore();
+    }
+
+    function getStateIndex(volume) {
+      if (volume <= 0) return 0;
+      if (volume < 30) return 1;
+      if (volume < 90) return 2;
+      return 3;
+    }
+
+    function updateTea(poses, deltaTime, width, height) {
+      if (poses.length < 2) {
+        teaParticles.length = 0;
+        return;
+      }
+
+      poses.forEach((source, sourceIndex) => {
+        const targetIndex = sourceIndex === 0 ? 1 : 0;
+        const glass = glasses[sourceIndex];
+
+        if (glass.volume <= 0 || source.brimDirection.y < 0.35) return;
+
+        const particleCount = Math.min(8, Math.ceil(deltaTime * 150));
+        for (let index = 0; index < particleCount; index += 1) {
+          const amount = Math.min(1.2, glass.volume);
+          if (amount <= 0) break;
+
+          glass.volume -= amount;
+          teaParticles.push({
+            x: source.brim.x + (Math.random() - 0.5) * source.size * 0.08,
+            y: source.brim.y + (Math.random() - 0.5) * source.size * 0.08,
+            velocityX: source.brimDirection.x * source.size * (1.05 + Math.random() * 0.3) + (Math.random() - 0.5) * 25,
+            velocityY: source.brimDirection.y * source.size * (1.05 + Math.random() * 0.3) + (Math.random() - 0.5) * 25,
+            radius: Math.max(2, width / 360) * (0.7 + Math.random() * 0.8),
+            amount,
+            targetIndex,
+            life: 2.8
+          });
+        }
+
+      });
+
+      for (let index = teaParticles.length - 1; index >= 0; index -= 1) {
+        const particle = teaParticles[index];
+        particle.velocityY += height * 3.1 * deltaTime;
+        particle.x += particle.velocityX * deltaTime;
+        particle.y += particle.velocityY * deltaTime;
+        particle.life -= deltaTime;
+
+        const target = poses[particle.targetIndex];
+        const hitRadius = Math.max(18, target.size * 0.14);
+        if (Math.hypot(particle.x - target.brim.x, particle.y - target.brim.y) < hitRadius) {
+          glasses[particle.targetIndex].volume = Math.min(100, glasses[particle.targetIndex].volume + particle.amount);
+          teaParticles.splice(index, 1);
+        } else if (particle.life <= 0 || particle.y > height + 40 || particle.x < -40 || particle.x > width + 40) {
+          teaParticles.splice(index, 1);
+        }
+      }
+    }
+
+    function drawTeaParticles(ctx) {
+      for (const particle of teaParticles) {
+        ctx.beginPath();
+        ctx.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
+        ctx.fillStyle = "#cc9457";
+        ctx.shadowColor = "#bd7427";
+        ctx.shadowBlur = 7;
+        ctx.fill();
+      }
+      ctx.shadowBlur = 0;
     }
 
     // function drawLightstick(ctx, x, y, deltaX, deltaY, width) {
@@ -237,10 +329,10 @@ export default function HandTracker() {
     //   ctx.restore();
     // }
 
-    function roundRect(ctx, x, y, width, height, radius) {
-      ctx.beginPath();
-      ctx.roundRect(x, y, width, height, radius);
-    }
+    // function roundRect(ctx, x, y, width, height, radius) {
+    //   ctx.beginPath();
+    //   ctx.roundRect(x, y, width, height, radius);
+    // }
 
     setup();
 
