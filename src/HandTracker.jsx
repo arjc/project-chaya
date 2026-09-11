@@ -130,7 +130,7 @@ export default function HandTracker() {
         }
 
         if (results.landmarks?.length) {
-          handPoses = getHandPoses(results.landmarks, width, height);
+          handPoses = getHandPoses(results, width, height);
         }
       }
 
@@ -157,13 +157,19 @@ export default function HandTracker() {
       if (!handPoses.length || !shouldKeepLastResults) return;
 
       handPoses.forEach((hand, index) => {
-        drawChayaGlass(ctx, hand, glasses[index], canvas.width);
+        if (hand) drawChayaGlass(ctx, hand, glasses[index], canvas.width);
       });
       drawTeaParticles(ctx);
     }
 
-    function getHandPoses(landmarks, width, height) {
-      return landmarks.slice(0, 2).map((hand) => {
+    function getHandPoses(results, width, height) {
+      const poses = [null, null];
+
+      results.landmarks.slice(0, 2).forEach((hand, detectionIndex) => {
+        const handedness = results.handednesses?.[detectionIndex]?.[0]?.categoryName?.toLowerCase();
+        const handSlot = handedness === "left" ? 0 : handedness === "right" ? 1 : null;
+        if (handSlot === null) return;
+
         const points = trackedLandmarks.map((landmarkIndex) => hand[landmarkIndex]);
         const firstPoint = { x: points[0].x * width, y: points[0].y * height };
         const secondPoint = { x: points[1].x * width, y: points[1].y * height };
@@ -172,8 +178,7 @@ export default function HandTracker() {
         const size = Math.max(110, Math.min(Math.hypot(secondPoint.x - firstPoint.x, secondPoint.y - firstPoint.y) * 3.2, width * 0.3));
         const anchor = getPointBetween(points[0], points[1], width, height);
         const brimDirection = { x: -Math.cos(handAngle), y: -Math.sin(handAngle) };
-
-        return {
+        poses[handSlot] = {
           anchor,
           size,
           angle,
@@ -181,6 +186,8 @@ export default function HandTracker() {
           brimDirection
         };
       });
+
+      return poses;
     }
 
     function getPointBetween(firstPoint, secondPoint, width, height) {
@@ -226,7 +233,7 @@ export default function HandTracker() {
       ctx.rotate(hand.angle);
       ctx.shadowColor = "rgba(0, 0, 0, 0.35)";
       ctx.shadowBlur = Math.max(8, width / 90);
-      ctx.drawImage(stateImage, -hand.size / 2, -hand.size / 2, hand.size * 0.5, hand.size * 0.75);
+      ctx.drawImage(stateImage, -hand.size / 4, -hand.size / 2, hand.size * 0.5, hand.size * 0.75);
       ctx.restore();
 
       ctx.save();
@@ -248,12 +255,13 @@ export default function HandTracker() {
     }
 
     function updateTea(poses, deltaTime, width, height) {
-      if (poses.length < 2) {
+      if (!poses[0] || !poses[1]) {
         teaParticles.length = 0;
         return;
       }
 
       poses.forEach((source, sourceIndex) => {
+        if (!source) return;
         const targetIndex = sourceIndex === 0 ? 1 : 0;
         const glass = glasses[sourceIndex];
 
@@ -287,6 +295,7 @@ export default function HandTracker() {
         particle.life -= deltaTime;
 
         const target = poses[particle.targetIndex];
+        if (!target) continue;
         const hitRadius = Math.max(18, target.size * 0.14);
         if (Math.hypot(particle.x - target.brim.x, particle.y - target.brim.y) < hitRadius) {
           glasses[particle.targetIndex].volume = Math.min(100, glasses[particle.targetIndex].volume + particle.amount);
@@ -350,7 +359,7 @@ export default function HandTracker() {
         ref={videoRef}
         playsInline
         muted
-      />
+        />
 
       <canvas
         ref={canvasRef}
