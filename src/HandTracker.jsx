@@ -271,9 +271,9 @@ export default function HandTracker() {
 
         if (glass.volume <= 0 || source.brimDirection.y < requiredTilt) return;
 
-        const particleCount = Math.min(18, Math.ceil(deltaTime * 360));
+        const particleCount = Math.min(16, Math.ceil(deltaTime * 300));
         for (let index = 0; index < particleCount; index += 1) {
-          const amount = Math.min(0.55, glass.volume);
+          const amount = Math.min(0.6, glass.volume);
           if (amount <= 0) break;
 
           glass.volume -= amount;
@@ -294,25 +294,11 @@ export default function HandTracker() {
       for (let index = teaParticles.length - 1; index >= 0; index -= 1) {
         const particle = teaParticles[index];
         particle.velocityY += height * 3.1 * deltaTime;
-
-        const target = poses[particle.targetIndex];
-        if (target) {
-          const deltaX = target.brim.x - particle.x;
-          const deltaY = target.brim.y - particle.y;
-          const distance = Math.hypot(deltaX, deltaY);
-          const steeringStrength = Math.min(1, Math.max(0, (2.8 - particle.life) / 0.8));
-          const assistAcceleration = height * 0.8 * steeringStrength;
-
-          if (distance > 0) {
-            particle.velocityX += (deltaX / distance) * assistAcceleration * deltaTime;
-            particle.velocityY += (deltaY / distance) * assistAcceleration * deltaTime;
-          }
-        }
-
         particle.x += particle.velocityX * deltaTime;
         particle.y += particle.velocityY * deltaTime;
         particle.life -= deltaTime;
 
+        const target = poses[particle.targetIndex];
         if (!target) continue;
         const hitRadius = Math.max(18, target.size * 0.14);
         if (Math.hypot(particle.x - target.brim.x, particle.y - target.brim.y) < hitRadius) {
