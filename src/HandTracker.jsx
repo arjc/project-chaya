@@ -265,11 +265,15 @@ export default function HandTracker() {
         const targetIndex = sourceIndex === 0 ? 1 : 0;
         const glass = glasses[sourceIndex];
 
-        if (glass.volume <= 0 || source.brimDirection.y < 0.35) return;
+        // A fuller tumbler must be tilted further before it starts pouring.
+        const fillRatio = Math.max(0, Math.min(1, glass.volume / 1));
+        const requiredTilt = -0.1;
 
-        const particleCount = Math.min(8, Math.ceil(deltaTime * 150));
+        if (glass.volume <= 0 || source.brimDirection.y < requiredTilt) return;
+
+        const particleCount = Math.min(18, Math.ceil(deltaTime * 360));
         for (let index = 0; index < particleCount; index += 1) {
-          const amount = Math.min(1.2, glass.volume);
+          const amount = Math.min(0.55, glass.volume);
           if (amount <= 0) break;
 
           glass.volume -= amount;
@@ -290,11 +294,25 @@ export default function HandTracker() {
       for (let index = teaParticles.length - 1; index >= 0; index -= 1) {
         const particle = teaParticles[index];
         particle.velocityY += height * 3.1 * deltaTime;
+
+        const target = poses[particle.targetIndex];
+        if (target) {
+          const deltaX = target.brim.x - particle.x;
+          const deltaY = target.brim.y - particle.y;
+          const distance = Math.hypot(deltaX, deltaY);
+          const steeringStrength = Math.min(1, Math.max(0, (2.8 - particle.life) / 0.8));
+          const assistAcceleration = height * 0.8 * steeringStrength;
+
+          if (distance > 0) {
+            particle.velocityX += (deltaX / distance) * assistAcceleration * deltaTime;
+            particle.velocityY += (deltaY / distance) * assistAcceleration * deltaTime;
+          }
+        }
+
         particle.x += particle.velocityX * deltaTime;
         particle.y += particle.velocityY * deltaTime;
         particle.life -= deltaTime;
 
-        const target = poses[particle.targetIndex];
         if (!target) continue;
         const hitRadius = Math.max(18, target.size * 0.14);
         if (Math.hypot(particle.x - target.brim.x, particle.y - target.brim.y) < hitRadius) {
